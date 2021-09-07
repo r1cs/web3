@@ -11,6 +11,10 @@ type Int struct {
 	value *big.Int
 }
 
+func (self Int) MarshalText() (text []byte, err error) {
+	return []byte(self.String()), nil
+}
+
 func (self *Int) val() *big.Int {
 	if self.value == nil {
 		self.value = big.NewInt(0)
@@ -105,6 +109,12 @@ func (self Int) Uint64() uint64 {
 
 func (self Int) ToBigInt() *big.Int {
 	return self.val()
+}
+
+func (self Int) Bytes32() [32]byte {
+	self.val()
+	bigInt := uint256.NewInt().SetBytes(self.val().Bytes())
+	return bigInt.Bytes32()
 }
 
 func (a Int) MulUint64(rhs uint64) Int {
