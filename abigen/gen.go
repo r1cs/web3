@@ -50,6 +50,68 @@ func funcName(str string) string {
 	return strings.Title(handleSnakeCase(str))
 }
 
+type tempType struct {
+	Name string
+	Type string
+}
+
+// tmplField is a wrapper around a struct field with binding language
+// struct type definition and relative filed name.
+type tempStruct struct {
+	Name string
+	GoType []*tempType
+}
+
+func encode(typ *abi.Type, structs map[string]*tempStruct )string {
+	switch typ.Kind() {
+	case abi.KindTuple:
+		id := typ.RawName()+typ.String()
+		if s,exist := structs[id];exist{
+			return s.Name
+		}
+		s := &tempStruct{Name: id}
+		for _,ty := range typ.TupleElems(){
+			goType := encode(ty.Elem,structs)
+			name := ty.Name
+			s.GoType=append(s.GoType,&tempType{Name: name,Type: goType})
+		}
+
+		name := typ.RawName()
+		if name==""{
+			name=fmt.Sprintf("Struct%d",len(structs))
+		}
+		s.Name=name
+		structs[id]=s
+		return name
+	case abi.KindAddress:
+		return "web3.Address"
+
+	case abi.KindString:
+		return "string"
+
+	case abi.KindBool:
+		return "bool"
+
+	case abi.KindInt:
+		return typ.GoType().String()
+
+	case abi.KindUInt:
+		return typ.GoType().String()
+
+	case abi.KindFixedBytes:
+		return fmt.Sprintf("[%d]byte", typ.Size())
+
+	case abi.KindBytes:
+		return "[]byte"
+
+	case abi.KindSlice:
+		return "[]" + encodeSimpleArg(typ.Elem())
+
+	default:
+		return fmt.Sprintf("input not done for type: %s", typ.String())
+	}
+}
+
 func encodeSimpleArg(typ *abi.Type) string {
 	switch typ.Kind() {
 	case abi.KindAddress:
@@ -100,10 +162,9 @@ func tupleLen(tuple interface{}) interface{} {
 	return len(arg.TupleElems())
 }
 
-func tupleElems(tuple interface{}) []interface{} {
-	res := []interface{}{}
+func tupleElems(tuple interface{}) (res []interface{}) {
 	if isNil(tuple) {
-		return res
+		return
 	}
 
 	arg, ok := tuple.(*abi.Type)
@@ -113,14 +174,30 @@ func tupleElems(tuple interface{}) []interface{} {
 	for _, i := range arg.TupleElems() {
 		res = append(res, i)
 	}
-	return res
+	return
 }
 
 func isNil(c interface{}) bool {
 	return c == nil || (reflect.ValueOf(c).Kind() == reflect.Ptr && reflect.ValueOf(c).IsNil())
 }
 
+// hasStruct returns an indicator whether the given type is struct, struct slice
+// or struct array.
+func hasStruct(t *abi.Type) bool {
+	switch t.Kind() {
+	case abi.KindSlice:
+		return hasStruct(t.Elem())
+	case abi.KindArray:
+		return hasStruct(t.Elem())
+	case abi.KindTuple:
+		return true
+	default:
+		return false
+	}
+}
+
 func GenCode(artifacts map[string]*compiler.Artifact, config *Config) error {
+	structs := make(map[string]*tempStruct)
 	funcMap := template.FuncMap{
 		"title":      strings.Title,
 		"clean":      cleanName,
@@ -145,12 +222,28 @@ func GenCode(artifacts map[string]*compiler.Artifact, config *Config) error {
 		if err != nil {
 			return err
 		}
+
+		if abi.Constructor!=nil&&hasStruct(abi.Constructor.Inputs){
+			encode(abi.Constructor.Inputs,structs)
+		}
+		for _,method:=range abi.Methods {
+			if hasStruct(method.Inputs) {
+				encode(method.Inputs, structs)
+			}
+		}
+		for _,event := range abi.Events{
+			if hasStruct(event.Inputs){
+				encode(event.Inputs,structs)
+			}
+		}
+
 		input := map[string]interface{}{
 			"Ptr":      "a",
 			"Config":   config,
 			"Contract": artifact,
 			"Abi":      abi,
 			"Name":     name,
+			"Structs":structs,
 		}
 
 		filename := strings.ToLower(name)
@@ -189,6 +282,15 @@ var (
 	_ = big.NewInt
 	_ = fmt.Printf
 )
+
+{{$structs := .Structs}}
+{{range $structs}}
+type {{.Name}} struct {
+{{range .GoType}}
+{{title .Name}}   {{.Type}} {{end}}
+}
+{{end}}
+
 
 // {{.Name}} is a solidity contract
 type {{.Name}} struct {
@@ -241,6 +343,8 @@ func ({{$.Ptr}} *{{$.Name}}) {{funcName $key}}({{range $index, $val := tupleElem
 func ({{$.Ptr}} *{{$.Name}}) {{funcName $key}}({{range $index, $input := tupleElems .Inputs}}{{if $index}}, {{end}}{{clean .Name}} {{arg .}}{{end}}) *contract.Txn {
 	return {{$.Ptr}}.c.Txn("{{$key}}"{{range $index, $elem := tupleElems .Inputs}}, {{clean $elem.Name}}{{end}})
 }
+
+
 {{end}}{{end}}`
 
 var templateBinStr = `package {{.Config.Package}}
