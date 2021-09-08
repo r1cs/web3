@@ -214,10 +214,10 @@ func hasStruct(t *abi.Type) bool {
 	}
 }
 
-func GenCode(artifacts map[string]*compiler.Artifact, config *Config) error {
-	structs := make(map[string]*tempStruct)
-	data, err := ioutil.ReadFile(filepath.Join(config.Output, "structs.json"))
-	if err ==nil {
+//readStructFromJson read struct from json cache
+func readStructFromJson(fileName string, structs map[string]*tempStruct) error {
+	data, err := ioutil.ReadFile(fileName)
+	if err == nil {
 		structsMem := new(StructsMem)
 		if err := structsMem.Read(data); err != nil {
 			return err
@@ -225,7 +225,73 @@ func GenCode(artifacts map[string]*compiler.Artifact, config *Config) error {
 		structsMem.ToTemp(structs) //set disk cache to memory
 	}
 
+	return nil
+}
+//readStructFromAbi read all struct in abi to structs.
+func readStructFromAbi(abi *abi.ABI, structs map[string]*tempStruct) {
 
+	if abi.Constructor != nil && hasStruct(abi.Constructor.Inputs) {
+		encode(abi.Constructor.Inputs, structs)
+	}
+	for _, method := range abi.Methods {
+		if hasStruct(method.Inputs) {
+			encode(method.Inputs, structs)
+		}
+	}
+	for _, event := range abi.Events {
+		if hasStruct(event.Inputs) {
+			encode(event.Inputs, structs)
+		}
+	}
+
+}
+func genStruct(abisStr []string, config *Config) error {
+	structs := make(map[string]*tempStruct)
+	if err := readStructFromJson(filepath.Join(config.Output, "structs.json"), structs); err != nil {
+		return fmt.Errorf("read struct from json: %w", err)
+	}
+
+	tempStruct, err := template.New("eth-structs").Funcs(map[string]interface{}{"title": strings.Title}).Parse(templateStructStr)
+	if err != nil {
+		return err
+	}
+	for _, abiStr := range abisStr {
+		// parse abi
+		abi, err := abi.NewABI(abiStr)
+		if err != nil {
+			return err
+		}
+		readStructFromAbi(abi,structs)
+	}
+
+	input := map[string]interface{}{
+		"Config":  config,
+		"Structs": structs,
+	}
+	var b bytes.Buffer
+	if err := tempStruct.Execute(&b, input); err != nil {
+		return err
+	}
+	if err := ioutil.WriteFile(filepath.Join(config.Output, config.Name+"_structs.go"), b.Bytes(), 0644); err != nil {
+		return err
+	}
+	if err := ioutil.WriteFile(filepath.Join(config.Output, "structs.json"), NewRStructsMem(structs).Bytes(), 0644); err != nil {
+		return err
+	}
+	return nil
+}
+
+func GenCode(artifacts map[string]*compiler.Artifact, config *Config) error {
+	var abisStr []string
+	for _, arti := range artifacts {
+		if arti.Abi != "" {
+			abisStr = append(abisStr, arti.Abi)
+		}
+	}
+
+	if err := genStruct(abisStr, config); err != nil {
+		return fmt.Errorf("genStruct: %s", err)
+	}
 	funcMap := template.FuncMap{
 		"title":      strings.Title,
 		"clean":      cleanName,
@@ -243,30 +309,12 @@ func GenCode(artifacts map[string]*compiler.Artifact, config *Config) error {
 	if err != nil {
 		return err
 	}
-	tempStruct, err := template.New("eth-structs").Funcs(map[string]interface{}{"title": strings.Title}).Parse(templateStructStr)
-	if err != nil {
-		return err
-	}
 
 	for name, artifact := range artifacts {
 		// parse abi
 		abi, err := abi.NewABI(artifact.Abi)
 		if err != nil {
 			return err
-		}
-
-		if abi.Constructor != nil && hasStruct(abi.Constructor.Inputs) {
-			encode(abi.Constructor.Inputs, structs)
-		}
-		for _, method := range abi.Methods {
-			if hasStruct(method.Inputs) {
-				encode(method.Inputs, structs)
-			}
-		}
-		for _, event := range abi.Events {
-			if hasStruct(event.Inputs) {
-				encode(event.Inputs, structs)
-			}
 		}
 
 		input := map[string]interface{}{
@@ -297,20 +345,7 @@ func GenCode(artifacts map[string]*compiler.Artifact, config *Config) error {
 		b.Reset()
 
 	}
-	input := map[string]interface{}{
-		"Config":  config,
-		"Structs": structs,
-	}
-	var b bytes.Buffer
-	if err := tempStruct.Execute(&b, input); err != nil {
-		return err
-	}
-	if err := ioutil.WriteFile(filepath.Join(config.Output, config.Name+"_structs.go"), b.Bytes(), 0644); err != nil {
-		return err
-	}
-	if err := ioutil.WriteFile(filepath.Join(config.Output, "structs.json"), NewRStructsMem(structs).Bytes(), 0644); err != nil {
-		return err
-	}
+
 	return nil
 }
 

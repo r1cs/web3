@@ -1,6 +1,7 @@
 package abigen
 
 import (
+	"fmt"
 	"github.com/laizy/web3/abi"
 	"github.com/stretchr/testify/require"
 	"os"
@@ -33,7 +34,7 @@ contract TestTuple {
 }
 */
 
-var structTestAbi = `
+var structTestAbi1 = `
 [
 	{
 		"inputs": [
@@ -102,7 +103,7 @@ var structTestAbi = `
 func TestTupleStructs(t *testing.T) {
 	assert := require.New(t)
 	// parse abi
-	abi, err := abi.NewABI(structTestAbi)
+	abi, err := abi.NewABI(structTestAbi1)
 	assert.Nil(err)
 
 	structs := make(map[string]*tempStruct)
@@ -134,3 +135,40 @@ type {{.Name}} struct {
 }
 {{end}}
 `
+
+func injectStructToStructs(ts *tempStruct, structs map[string]*tempStruct) {
+	structs[ts.Name] = ts
+}
+
+func TestGenStruct(t *testing.T) {
+	assert := require.New(t)
+
+	var structs=make(map[string]*tempStruct)
+	//config := &Config{Name: "testName", Output: os.Stdout.Name(), Package: "test"}
+
+	abi1,err := abi.NewABI(structTestAbi1)
+	assert.Nil(err)
+
+	readStructFromAbi(abi1,structs)//read to structs
+
+	old:=len(structs)
+	readStructFromAbi(abi1,structs)//read duplicated, but the length won't grow.
+	assert.Equal(old,len(structs))
+
+	injectStructToStructs(&tempStruct{Name: "FakeStruct"},structs)
+	readStructFromAbi(abi1,structs)//the length should grow 1
+	assert.Equal(old+1,len(structs))
+
+	var oldname string
+	for name,_:= range structs{
+		oldname=name //read an struct from it
+		break
+	}
+	injectStructToStructs(&tempStruct{Name: oldname},structs) //will recover oldname
+
+	defer func() {
+		e:=recover()
+		assert.Equal(e.(string),fmt.Sprintf("deprecated struct: %s, should change pkg to different file.", oldname))
+	}()
+	readStructFromAbi(abi1,structs)//old struct have already in structs, but the inner type is not equal, should panic
+}
