@@ -58,30 +58,46 @@ type tempType struct {
 // tmplField is a wrapper around a struct field with binding language
 // struct type definition and relative filed name.
 type tempStruct struct {
-	Name string
+	Name   string
 	GoType []*tempType
 }
 
-func encode(typ *abi.Type, structs map[string]*tempStruct )string {
+func (a *tempStruct) deepEqual(b *tempStruct) bool {
+	if a.Name != b.Name {
+		return false
+	}
+	if len(a.GoType) != len(b.GoType) {
+		return false
+	}
+	for i, _ := range a.GoType {
+		if a.GoType[i].Type != b.GoType[i].Type || a.GoType[i].Name != b.GoType[i].Name {
+			return false
+		}
+	}
+	return true
+}
+
+func encode(typ *abi.Type, structs map[string]*tempStruct) string {
 	switch typ.Kind() {
 	case abi.KindTuple:
-		id := typ.RawName()+typ.String()
-		if s,exist := structs[id];exist{
-			return s.Name
-		}
-		s := &tempStruct{Name: id}
-		for _,ty := range typ.TupleElems(){
-			goType := encode(ty.Elem,structs)
-			name := ty.Name
-			s.GoType=append(s.GoType,&tempType{Name: name,Type: goType})
-		}
 
 		name := typ.RawName()
-		if name==""{
-			name=fmt.Sprintf("Struct%d",len(structs))
+		s := &tempStruct{Name: name}
+		for _, ty := range typ.TupleElems() {
+			goType := encode(ty.Elem, structs)
+			name := ty.Name
+			s.GoType = append(s.GoType, &tempType{Name: name, Type: goType})
 		}
-		s.Name=name
-		structs[id]=s
+
+		if name == "" { //input will have no rawName, just use Struct%d now.
+			return ""
+		}
+		if old, exist := structs[name]; exist { //check if two struct have same name but different struct, panic.
+			if !s.deepEqual(old) {
+				panic(fmt.Sprintf("deprecated struct: %s, should change pkg to different file.", name))
+			}
+		}
+		structs[name] = s
 		return name
 	case abi.KindAddress:
 		return "web3.Address"
@@ -138,6 +154,8 @@ func encodeSimpleArg(typ *abi.Type) string {
 	case abi.KindSlice:
 		return "[]" + encodeSimpleArg(typ.Elem())
 
+	case abi.KindTuple:
+		return typ.RawName()
 	default:
 		return fmt.Sprintf("input not done for type: %s", typ.String())
 	}
@@ -198,6 +216,16 @@ func hasStruct(t *abi.Type) bool {
 
 func GenCode(artifacts map[string]*compiler.Artifact, config *Config) error {
 	structs := make(map[string]*tempStruct)
+	data, err := ioutil.ReadFile(filepath.Join(config.Output, "structs.json"))
+	if err ==nil {
+		structsMem := new(StructsMem)
+		if err := structsMem.Read(data); err != nil {
+			return err
+		}
+		structsMem.ToTemp(structs) //set disk cache to memory
+	}
+
+
 	funcMap := template.FuncMap{
 		"title":      strings.Title,
 		"clean":      cleanName,
@@ -215,6 +243,10 @@ func GenCode(artifacts map[string]*compiler.Artifact, config *Config) error {
 	if err != nil {
 		return err
 	}
+	tempStruct, err := template.New("eth-structs").Funcs(map[string]interface{}{"title": strings.Title}).Parse(templateStructStr)
+	if err != nil {
+		return err
+	}
 
 	for name, artifact := range artifacts {
 		// parse abi
@@ -223,27 +255,26 @@ func GenCode(artifacts map[string]*compiler.Artifact, config *Config) error {
 			return err
 		}
 
-		if abi.Constructor!=nil&&hasStruct(abi.Constructor.Inputs){
-			encode(abi.Constructor.Inputs,structs)
+		if abi.Constructor != nil && hasStruct(abi.Constructor.Inputs) {
+			encode(abi.Constructor.Inputs, structs)
 		}
-		for _,method:=range abi.Methods {
+		for _, method := range abi.Methods {
 			if hasStruct(method.Inputs) {
 				encode(method.Inputs, structs)
 			}
 		}
-		for _,event := range abi.Events{
-			if hasStruct(event.Inputs){
-				encode(event.Inputs,structs)
+		for _, event := range abi.Events {
+			if hasStruct(event.Inputs) {
+				encode(event.Inputs, structs)
 			}
 		}
 
 		input := map[string]interface{}{
-			"Ptr":      "a",
+			"Ptr":      "_a",
 			"Config":   config,
 			"Contract": artifact,
 			"Abi":      abi,
 			"Name":     name,
-			"Structs":structs,
 		}
 
 		filename := strings.ToLower(name)
@@ -263,6 +294,22 @@ func GenCode(artifacts map[string]*compiler.Artifact, config *Config) error {
 		if err := ioutil.WriteFile(filepath.Join(config.Output, filename+"_artifacts.go"), []byte(b.Bytes()), 0644); err != nil {
 			return err
 		}
+		b.Reset()
+
+	}
+	input := map[string]interface{}{
+		"Config":  config,
+		"Structs": structs,
+	}
+	var b bytes.Buffer
+	if err := tempStruct.Execute(&b, input); err != nil {
+		return err
+	}
+	if err := ioutil.WriteFile(filepath.Join(config.Output, config.Name+"_structs.go"), b.Bytes(), 0644); err != nil {
+		return err
+	}
+	if err := ioutil.WriteFile(filepath.Join(config.Output, "structs.json"), NewRStructsMem(structs).Bytes(), 0644); err != nil {
+		return err
 	}
 	return nil
 }
@@ -283,13 +330,6 @@ var (
 	_ = fmt.Printf
 )
 
-{{$structs := .Structs}}
-{{range $structs}}
-type {{.Name}} struct {
-{{range .GoType}}
-{{title .Name}}   {{.Type}} {{end}}
-}
-{{end}}
 
 
 // {{.Name}} is a solidity contract

@@ -375,9 +375,9 @@ func (a *argument) UnmarshalJSON(data []byte) error {
 		if arg.InternalType == "" {
 			t.tupleName = ""
 		} else {
-			tuplename := strings.ReplaceAll(arg.InternalType, ".", " ")
+			tuples := strings.Split(arg.InternalType, ".")
+			tuplename := tuples[len(tuples)-1]
 			tuplename = strings.Title(tuplename)
-			tuplename = strings.ReplaceAll(tuplename, " ", "")
 			t.tupleName = tuplename
 		}
 	}
