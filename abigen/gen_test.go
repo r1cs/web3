@@ -143,32 +143,140 @@ func injectStructToStructs(ts *tempStruct, structs map[string]*tempStruct) {
 func TestGenStruct(t *testing.T) {
 	assert := require.New(t)
 
-	var structs=make(map[string]*tempStruct)
+	var structs = make(map[string]*tempStruct)
 	//config := &Config{Name: "testName", Output: os.Stdout.Name(), Package: "test"}
 
-	abi1,err := abi.NewABI(structTestAbi1)
+	abi1, err := abi.NewABI(structTestAbi1)
 	assert.Nil(err)
 
-	readStructFromAbi(abi1,structs)//read to structs
+	readStructFromAbi(abi1, structs) //read to structs
 
-	old:=len(structs)
-	readStructFromAbi(abi1,structs)//read duplicated, but the length won't grow.
-	assert.Equal(old,len(structs))
+	old := len(structs)
+	readStructFromAbi(abi1, structs) //read duplicated, but the length won't grow.
+	assert.Equal(old, len(structs))
 
-	injectStructToStructs(&tempStruct{Name: "FakeStruct"},structs)
-	readStructFromAbi(abi1,structs)//the length should grow 1
-	assert.Equal(old+1,len(structs))
+	injectStructToStructs(&tempStruct{Name: "FakeStruct"}, structs)
+	readStructFromAbi(abi1, structs) //the length should grow 1
+	assert.Equal(old+1, len(structs))
 
 	var oldname string
-	for name,_:= range structs{
-		oldname=name //read an struct from it
+	for name, _ := range structs {
+		oldname = name //read an struct from it
 		break
 	}
-	injectStructToStructs(&tempStruct{Name: oldname},structs) //will recover oldname
+	injectStructToStructs(&tempStruct{Name: oldname}, structs) //will recover oldname
 
 	defer func() {
-		e:=recover()
-		assert.Equal(e.(string),fmt.Sprintf("deprecated struct: %s, should change pkg to different file.", oldname))
+		e := recover()
+		assert.Equal(e.(string), fmt.Sprintf("deprecated struct: %s, should change pkg to different file.", oldname))
 	}()
-	readStructFromAbi(abi1,structs)//old struct have already in structs, but the inner type is not equal, should panic
+	readStructFromAbi(abi1, structs) //old struct have already in structs, but the inner type is not equal, should panic
+}
+
+var evnentTestAbi = `
+[
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "previousOwner",
+				"type": "address"
+			},
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "newOwner",
+				"type": "address"
+			}
+		],
+		"name": "OwnershipTransferred",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "string",
+				"name": "",
+				"type": "string"
+			},
+			{
+				"indexed": false,
+				"internalType": "bytes",
+				"name": "",
+				"type": "bytes"
+			}
+		],
+		"name": "TestEvent",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "string",
+				"name": "",
+				"type": "string"
+			},
+			{
+				"indexed": true,
+				"internalType": "bytes",
+				"name": "",
+				"type": "bytes"
+			}
+		],
+		"name": "TestIndexed",
+		"type": "event"
+	}
+]
+`
+
+//checkInnerName check struct inner args name not empty and not duplicated
+func checkEventInner(event *abi.Event) error {
+	dup := make(map[string]bool)
+	for _, tuple := range event.Inputs.TupleElems() {
+		name := tuple.Name
+		if name == "" {
+			return fmt.Errorf("the struct inner args name can't be empty")
+		}
+		if dup[name] {
+			return fmt.Errorf("the struct inner args name can't be duplicated")
+		}
+	}
+	return nil
+}
+
+func TestGenEvents(t *testing.T) {
+	assert := require.New(t)
+
+	eventAbi, err := abi.NewABI(evnentTestAbi)
+	assert.Nil(err)
+
+	var events []*abi.Event
+	for _, event := range eventAbi.Events {
+		event = optimizeEvent(event)
+		assert.Nil(checkEventInner(event))
+		events = append(events, event)
+	}
+
+	funcMap := template.FuncMap{
+		"title":      strings.Title,
+		"arg":        encodeArg,
+		"argTopic":   encodeTopicArg,
+		"tupleElems": tupleElems,
+	}
+	tempevent, err := template.New("test-events").Funcs(funcMap).Parse(templateEvents)
+	assert.Nil(err)
+
+	input := map[string]interface{}{
+		"Config": &Config{Name: "testEvent"},
+		"Name":   "TestGenEvents",
+		"Events": events,
+	}
+
+	assert.Nil(tempevent.Execute(os.Stdout, input))
 }

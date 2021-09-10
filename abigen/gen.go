@@ -89,8 +89,8 @@ func encode(typ *abi.Type, structs map[string]*tempStruct) string {
 			s.GoType = append(s.GoType, &tempType{Name: name, Type: goType})
 		}
 
-		if name == "" { //input will have no rawName, just use Struct%d now.
-			return ""
+		if name == "" { //input will have no rawName,this should be method's inputs
+			return "" //this action should only be top level.
 		}
 		if old, exist := structs[name]; exist { //check if two struct have same name but different struct, panic.
 			if !s.deepEqual(old) {
@@ -227,6 +227,7 @@ func readStructFromJson(fileName string, structs map[string]*tempStruct) error {
 
 	return nil
 }
+
 //readStructFromAbi read all struct in abi to structs.
 func readStructFromAbi(abi *abi.ABI, structs map[string]*tempStruct) {
 
@@ -261,7 +262,7 @@ func genStruct(abisStr []string, config *Config) error {
 		if err != nil {
 			return err
 		}
-		readStructFromAbi(abi,structs)
+		readStructFromAbi(abi, structs)
 	}
 
 	input := map[string]interface{}{
@@ -291,6 +292,9 @@ func GenCode(artifacts map[string]*compiler.Artifact, config *Config) error {
 
 	if err := genStruct(abisStr, config); err != nil {
 		return fmt.Errorf("genStruct: %s", err)
+	}
+	if err := genEvents(artifacts,config);err!=nil{
+		return fmt.Errorf("genEvents: %w",err)
 	}
 	funcMap := template.FuncMap{
 		"title":      strings.Title,
