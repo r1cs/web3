@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/laizy/web3/contract"
 	"github.com/laizy/web3"
 )
 
@@ -27,15 +28,44 @@ var (
 )
 
 {{$name:=.Name}}
-{{range .Events}}
-type {{title .Name}}Params struct{ {{range $k,$v :=tupleElems .Inputs}}
-{{title $v.Name}}  {{if $v.Indexed}} {{argTopic $v}} {{else}}  {{arg $v}} {{end}} {{end}}
+
+// {{$name}}Filterer is an auto generated log filtering Go binding around an Ethereum contract events.
+type {{$name}}Filterer struct {
+contract *contract.Contract
 }
-// {{$name}}{{.Name}} represents a {{.Name}} event raised by the {{$name}} contract.
-type {{$name}}{{.Name}} struct {
-{{title .Name}}  *{{title .Name}}Params
+
+{{range .Events}}
+type {{title $name}}{{title .Name}} struct{ {{range $k,$v :=tupleElems .Inputs}}
+{{cleanTitle $v.Name}}  {{if $v.Indexed}} {{argTopic $v}} {{else}}  {{arg $v}} {{end}} {{end}}
+
 Raw web3.Log // Blockchain specific contextual infos
 }
+
+// {{$name}}{{.Name}} represents a {{.Name}} event raised by the {{$name}} contract.
+type {{$name}}{{.Name}}Iterator struct {
+	Event  *{{title $name}}{{title .Name}} 
+	contract	*contract.Contract // Generic contract to use for unpacking event data
+	event    string              // Event name to use for unpacking event data
+
+	logs []*web3.Log        //the found contract events
+}
+
+// Filter{{title .Name}} is a free log retrieval operation binding the contract event 0x {printf "%x" .Original.ID}.
+//
+// Solidity: {{.Name}}
+func (_{{$name}} *{{$name}}Filterer) Filter{{.Name}}(opts *web3.FilterOpts{{range $k,$v :=tupleElems .Inputs}}{{if $v.Indexed}}, {{$v.Name}} []{{argTopic $v}}{{end}}{{end}}) (*{{$name}}{{.Name}}Iterator, error) {
+{{range $k,$v := tupleElems .Inputs}}
+{{if $v.Indexed}}var {{$v.Name}}Rule []interface{}
+for _, {{$v.Name}}Item := range {{$v.Name}} {
+	{{$v.Name}}Rule = append({{$v.Name}}Rule, {{$v.Name}}Item)
+}{{end}}{{end}}
+logs, err := _{{$name}}.contract.FilterLogs(opts, "{{.Name}}"{{range $k,$v := tupleElems .Inputs}}{{if $v.Indexed}}, {{$v.Name}}Rule{{end}}{{end}})
+if err != nil {
+	return nil, err
+}
+return &{{$name}}{{.Name}}Iterator{contract: _{{$name}}.contract, event: "{{.Name}}", logs: logs}, nil
+}
+
 {{end}}
 
 
@@ -61,13 +91,7 @@ func encodeTopicArg(str interface{}) string {
 
 func genEvents(artifacts map[string]*compiler.Artifact, config *Config) error {
 
-	funcMap := template.FuncMap{
-		"title":      strings.Title,
-		"arg":        encodeArg,
-		"argTopic":   encodeTopicArg,
-		"tupleElems": tupleElems,
-	}
-	tempevent, err := template.New("eth-events").Funcs(funcMap).Parse(templateEvents)
+	tempevent, err := template.New("eth-events").Funcs(newFuncMap()).Parse(templateEvents)
 	if err != nil {
 		return err
 	}
@@ -80,6 +104,9 @@ func genEvents(artifacts map[string]*compiler.Artifact, config *Config) error {
 			return err
 		}
 		for _, event := range abi.Events {
+			if event.Anonymous {
+				continue //don't support
+			}
 			events = append(events, optimizeEvent(event))
 		}
 		input := map[string]interface{}{
@@ -95,7 +122,6 @@ func genEvents(artifacts map[string]*compiler.Artifact, config *Config) error {
 		if err := ioutil.WriteFile(filepath.Join(config.Output, filename+"_events.go"), buff.Bytes(), 0644); err != nil {
 			return err
 		}
-
 	}
 	return nil
 }

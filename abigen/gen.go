@@ -246,13 +246,32 @@ func readStructFromAbi(abi *abi.ABI, structs map[string]*tempStruct) {
 	}
 
 }
+
+func cleanTitle(s string) string {
+	return strings.Title(cleanName(s))
+}
+
+func newFuncMap() template.FuncMap {
+	return template.FuncMap{
+		"title":      strings.Title,
+		"clean":      cleanName,
+		"cleanTitle": cleanTitle,
+		"arg":        encodeArg,
+		"argTopic":   encodeTopicArg,
+		"outputArg":  outputArg,
+		"funcName":   funcName,
+		"tupleElems": tupleElems,
+		"tupleLen":   tupleLen,
+	}
+}
+
 func genStruct(abisStr []string, config *Config) error {
 	structs := make(map[string]*tempStruct)
 	if err := readStructFromJson(filepath.Join(config.Output, "structs.json"), structs); err != nil {
 		return fmt.Errorf("read struct from json: %w", err)
 	}
 
-	tempStruct, err := template.New("eth-structs").Funcs(map[string]interface{}{"title": strings.Title}).Parse(templateStructStr)
+	tempStruct, err := template.New("eth-structs").Funcs(newFuncMap()).Parse(templateStructStr)
 	if err != nil {
 		return err
 	}
@@ -293,18 +312,10 @@ func GenCode(artifacts map[string]*compiler.Artifact, config *Config) error {
 	if err := genStruct(abisStr, config); err != nil {
 		return fmt.Errorf("genStruct: %s", err)
 	}
-	if err := genEvents(artifacts,config);err!=nil{
-		return fmt.Errorf("genEvents: %w",err)
+	if err := genEvents(artifacts, config); err != nil {
+		return fmt.Errorf("genEvents: %w", err)
 	}
-	funcMap := template.FuncMap{
-		"title":      strings.Title,
-		"clean":      cleanName,
-		"arg":        encodeArg,
-		"outputArg":  outputArg,
-		"funcName":   funcName,
-		"tupleElems": tupleElems,
-		"tupleLen":   tupleLen,
-	}
+	funcMap := newFuncMap()
 	tmplAbi, err := template.New("eth-abi").Funcs(funcMap).Parse(templateAbiStr)
 	if err != nil {
 		return err
