@@ -159,11 +159,22 @@ func encodeTuple(v reflect.Value, t *Type) ([]byte, error) {
 	return append(ret, tail...), nil
 }
 
+func ToName(name string, index int) string {
+	if name == "" {
+		return fmt.Sprintf("arg%d", index)
+	}
+
+	return strings.Trim(name, "_")
+}
+
+func ToStructName(name string, index int) string { return strings.Title(ToName(name, index)) }
+
 func NameToKey(name string, index int) string {
 	if name == "" {
 		return strconv.Itoa(index)
 	}
-	return strings.ToLower(name)
+
+	return strings.ToLower(strings.Trim(name, "_"))
 }
 
 func convertArrayToBytes(value reflect.Value) reflect.Value {
