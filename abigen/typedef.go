@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"text/template"
 
 	"github.com/laizy/web3/abi"
@@ -24,8 +23,9 @@ type FieldDef struct {
 }
 
 type StructDef struct {
-	Name   string
-	Fields []*FieldDef
+	Name    string
+	Fields  []*FieldDef
+	IsEvent bool
 }
 
 type StructDefExtractor struct {
@@ -92,17 +92,36 @@ func (self *StructDefExtractor) ExtractFromType(typ *abi.Type) string {
 	}
 }
 
+//ExtractEvent generate event type, and record it for not duplicated.
+func (self *StructDefExtractor) ExtractEvent(e *abi.Event) {
+	s := &StructDef{Name: e.Name + "Event", IsEvent: true}
+	for _, elem := range e.Inputs.TupleElems() {
+		typ := self.ExtractFromType(elem.Elem)
+		if elem.Indexed {
+			typ = transferToTopic(typ)
+		}
+		s.Fields = append(s.Fields, &FieldDef{Name: elem.Name, Type: typ})
+	}
+	if old, exist := self.Defs[s.Name]; exist { // check if two struct have same name but different struct, panic.
+		if !reflect.DeepEqual(s, old) {
+			panic(ErrConflictDef)
+		}
+	}
+	self.Defs[s.Name] = s
+}
+
 func (self *StructDefExtractor) ExtractFromAbi(abi *abi.ABI) *StructDefExtractor {
 	if abi.Constructor != nil {
 		self.ExtractFromType(abi.Constructor.Inputs)
-		//self.GetOutPutStructs(abi.Constructor.Outputs)
 	}
 	for _, method := range abi.Methods {
 		self.ExtractFromType(method.Inputs)
-		//self.GetOutPutStructs(method.Outputs)
+		self.ExtractFromType(method.Outputs)
 	}
 	for _, event := range abi.Events {
-		self.ExtractFromType(event.Inputs)
+		ev := optimizeEvent(event)
+		self.ExtractFromType(ev.Inputs)
+		self.ExtractEvent(ev)
 	}
 
 	return self
@@ -139,7 +158,7 @@ func (self *StructDefExtractor) RenderGoCodeToFile(packageName string, outputDir
 }
 
 func (self *StructDefExtractor) RenderGoCode(packageName string) (string, error) {
-	tempStruct, err := template.New("eth-structs").Funcs(map[string]interface{}{"title": strings.Title}).Parse(templateStructStr)
+	tempStruct, err := template.New("eth-structs").Funcs(map[string]interface{}{"title": toCamelCase}).Parse(templateStructStr)
 	utils.Ensure(err)
 
 	input := map[string]interface{}{
@@ -169,6 +188,7 @@ import (
 var (
 	_ = big.NewInt
 	_ = fmt.Printf
+	_ = web3.HexToAddress
 )
 
 {{$structs := .Structs}}
@@ -176,6 +196,8 @@ var (
 type {{.Name}} struct {
 {{range .Fields}}
 {{title .Name}}   {{.Type}} {{end}}
+{{if .IsEvent}}
+Raw *web3.Log {{end}}
 }
 {{end}}
 `
