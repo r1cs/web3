@@ -102,6 +102,15 @@ func (self Int) Div(value interface{}) Int {
 	return Int{big.NewInt(0).Div(self.val(), val.val())}
 }
 
+func (self Int) Mod(value interface{}) Int {
+	val := New(value)
+	return Int{big.NewInt(0).Mod(self.val(), val.val())}
+}
+
+func (self Int) Sqrt() Int {
+	return Int{big.NewInt(0).Sqrt(self.val())}
+}
+
 func (self Int) Uint64() uint64 {
 	utils.EnsureTrue(self.val().IsUint64())
 	return self.val().Uint64()
