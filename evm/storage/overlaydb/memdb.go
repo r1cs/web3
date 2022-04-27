@@ -206,13 +206,12 @@ func (self *MemDB) Snapshot() *MemDB {
 		cmp:       self.cmp,
 		rnd:       self.rnd,
 		kvData:    self.kvData,
-		nodeData:  self.nodeData,
+		nodeData:  append([]int{}, self.nodeData...),
 		prevNode:  self.prevNode,
 		maxHeight: self.maxHeight,
 		n:         self.n,
 		kvSize:    self.kvSize,
 	}
-
 	return cloned
 }
 

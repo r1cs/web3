@@ -221,7 +221,10 @@ func (self *EthAccount) IsEmpty() bool {
 
 func (self *EthAccount) Serialization(sink *codec.ZeroCopySink) {
 	sink.WriteUint64(self.Nonce)
-	balance := self.Balance.Bytes32()
+	var balance [32]byte
+	if self.Balance != nil {
+		balance = self.Balance.Bytes32()
+	}
 	sink.WriteBytes(balance[:])
 	sink.WriteVarBytes(self.Code)
 	sink.WriteHash(self.CodeHash)
@@ -392,10 +395,9 @@ func (self *StateDB) Snapshot() int {
 }
 
 func (self *StateDB) DiscardSnapshot(idx int) {
-	if idx+1 == len(self.snapshots) {
+	if idx+1 != len(self.snapshots) {
 		panic("can only discard top snapshot")
 	}
-
 	self.snapshots = self.snapshots[:idx]
 }
 
