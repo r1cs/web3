@@ -93,6 +93,7 @@ type RPCEnqueuedTx struct {
 	From       web3.Address   `json:"from"`
 	To         web3.Address   `json:"to"`
 	RlpTx      hexutil.Bytes  `json:"rlpTx"`
+	TxHash     web3.Hash      `json:"txHash"`
 	Timestamp  hexutil.Uint64 `json:"timestamp"`
 }
 
